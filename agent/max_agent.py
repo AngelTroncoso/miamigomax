@@ -102,6 +102,32 @@ except ImportError:
     BedrockModel = None  # type: ignore
 
 
+def _leer_credenciales_aws() -> dict:
+    """
+    Devuelve las credenciales de AWS como dict con claves
+    'aws_access_key_id', 'aws_secret_access_key' y 'region_name'.
+
+    Prioridad:
+      1. st.secrets["aws"] (Streamlit Community Cloud)
+      2. Variables de entorno / .env (ejecución local con python-dotenv)
+    """
+    try:
+        import streamlit as st  # type: ignore
+        aws = st.secrets["aws"]
+        return {
+            "aws_access_key_id": aws["access_key_id"],
+            "aws_secret_access_key": aws["secret_access_key"],
+            "region_name": aws.get("region", "us-east-1"),
+        }
+    except Exception:  # noqa: BLE001
+        # st.secrets no disponible (CLI local) → usar variables de entorno / .env
+        return {
+            "aws_access_key_id": os.environ.get("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            "region_name": os.environ.get("AWS_REGION", "us-east-1"),
+        }
+
+
 def _crear_cliente_bedrock():
     """
     Crea el cliente boto3 de Bedrock con timeouts y reintentos configurados.
@@ -112,13 +138,19 @@ def _crear_cliente_bedrock():
     try:
         import boto3
         from botocore.config import Config  # type: ignore
-        region = os.environ.get("AWS_REGION", "us-east-1")
+        credenciales = _leer_credenciales_aws()
         config = Config(
             connect_timeout=10,
             read_timeout=30,
             retries={"max_attempts": 2},
         )
-        return boto3.client("bedrock-runtime", region_name=region, config=config)
+        return boto3.client(
+            "bedrock-runtime",
+            region_name=credenciales["region_name"],
+            aws_access_key_id=credenciales["aws_access_key_id"],
+            aws_secret_access_key=credenciales["aws_secret_access_key"],
+            config=config,
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("No se pudo crear el cliente de Bedrock: %s", e)
         return None
